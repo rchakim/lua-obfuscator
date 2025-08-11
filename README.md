@@ -4,7 +4,6 @@
 ---
 
 ## Prerequisites
-- Node.js installed on your system
 - Lua interpreter (version must match between obfuscation and execution)
 
 ---
