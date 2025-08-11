@@ -1,43 +1,78 @@
-# Lua Obfuscator
+# **Lua Obfuscator**  
+*A tool for obfuscating/encrypting Lua source code to protect intellectual property*
 
-A tool for obfuscating/encrypting Lua source code to protect intellectual property.
+---
 
 ## Prerequisites
-
 - Node.js installed on your system
 - Lua interpreter (version must match between obfuscation and execution)
 
-## Installation
+---
 
-### Option 1: Clone Repository
+## **Installation**  
+
+### **Option 1: Clone the Repository**  
 ```bash
 git clone https://github.com/rchakim/lua-obfuscator.git
 cd lua-obfuscator
-```
+```  
 
-### Option 2: Download ZIP
-1. Download the repository ZIP from GitHub
-2. Extract the contents to your preferred location
+### **Option 2: Download as ZIP**  
+Download the latest release from GitHub and extract it.  
 
-## Usage
+---
 
-To obfuscate a Lua file:
+## **Usage**  
+Run the obfuscator via the **Command Line Interface (CLI)**:  
+
 ```bash
-lua cli.lua input_file.lua
-```
+lua cli.lua <input_file.lua> [preset]
+```  
 
-The tool will generate obfuscated output.
+### **Parameters**  
+| Argument | Description |  
+|----------|-------------|  
+| `input_file.lua` | Path to the Lua file you want to obfuscate |  
+| `preset` *(optional)* | Obfuscation method (default: byte transformation) |  
 
-## Important Note
+### **Available Presets**  
+- `--b` → **Byte transformation** *(default, preset 1)*  
+- `--h` → **Hex transformation** *(preset 2)*  
 
-**Version Compatibility Warning**: The obfuscated code must be executed using the same Lua version that was used for obfuscation. For example:
-- If you obfuscate with Lua 5.2, you must run the obfuscated code with Lua 5.2
-- Using a different Lua version may cause execution errors
+### **Example**  
+```bash
+lua cli.lua script.lua --h
+```  
+→ Generates: `script.enc.lua`  
 
-## Features
+---
 
-- Code encryption to protect intellectual property
-- Preserves original functionality while obscuring readability
-- CLI interface for easy integration into build processes
+## **Important Notes**  
 
-This version improves readability, adds more structure, and clarifies the purpose and requirements of the tool.
+### **1. Version Compatibility**  
+- The obfuscated script **must** be executed using the **same Lua version** used for obfuscation.  
+
+### **2. Output Files**  
+| Result | Output File |  
+|--------|-------------|  
+| Success | `<input>.enc.lua` |  
+| Failure | `<input>.err.lua` (contains error details) |  
+
+### **3. Transformations Applied**  
+- **String Conversion** → Escaped byte representation  
+- **Dot Notation** → Converted to bracket notation (`obj.method` → `obj["method"]`)  
+- **Method-Style Functions** → Changed to assignment-style (`function obj:method()` → `obj.method = function()`)  
+- **Preset-Based String Encoding** (Byte or Hex)  
+
+### **4. Error Handling**  
+- Syntax validation before obfuscation.  
+- Clear error messages if the process fails.  
+
+---
+
+### **Why Use This Obfuscator?**  
+- Protects intellectual property by making code harder to reverse-engineer.  
+- Lightweight transformations without breaking functionality.  
+- Supports multiple encoding methods.  
+
+---
