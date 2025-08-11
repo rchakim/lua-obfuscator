@@ -1,257 +1,273 @@
 -- Creator: Arif Rahman
 -- Copyright (c) 2025 Arif Rahman. All rights reserved.
 
--- Loads the translation module for string manipulation
-local translator = require("src.translate")
+-- Load required modules for string transformation
+local translator = require("src.translator")
+local byteTransformer = require("src.byte")
+local hexTransformer = require("src.hex")
 
 -- Parses Lua code to identify strings and comments, invoking a callback for each
-local function parse_strings_and_comments(lua_code, callback)
+-- @param luaCode The input Lua code to parse
+-- @param callback Function to process identified strings or comments
+local function parseStringsAndComments(luaCode, callback)
     local tokens = {}
-    -- Capture comment patterns (single-line or multi-line)
-    for start_pos, open_bracket, equals, close_bracket in lua_code:gmatch("()%-%-(%-*%[?)(=*)(%[?)") do
+    -- Identify single-line and multi-line comments
+    for startPos, openBracket, equals, closeBracket in luaCode:gmatch("()%-%-(%-*%[?)(=*)(%[?)") do
         table.insert(tokens, {
-            startPos = start_pos,
-            terminator = open_bracket == "[" and close_bracket == "[" and "]" .. equals .. "]" or "\n",
+            startPos = startPos,
+            terminator = openBracket == "[" and closeBracket == "[" and "]" .. equals .. "]" or "\n",
         })
     end
-    -- Capture multi-line string patterns
-    for start_pos, equals in lua_code:gmatch("()%[(=*)%[[%[=]*") do
-        table.insert(tokens, { isString = true, startPos = start_pos, terminator = "]" .. equals .. "]" })
+    -- Identify multi-line strings
+    for startPos, equals in luaCode:gmatch("()%[(=*)%[[%[=]*") do
+        table.insert(tokens, { isString = true, startPos = startPos, terminator = "]" .. equals .. "]" })
     end
-    -- Capture single/double-quoted string patterns
-    for start_pos, quote in lua_code:gmatch("()(['\"])") do
-        table.insert(tokens, { isString = true, startPos = start_pos, quote = quote })
+    -- Identify single/double-quoted strings
+    for startPos, quote in luaCode:gmatch("()(['\"])") do
+        table.insert(tokens, { isString = true, startPos = startPos, quote = quote })
     end
-    -- Sort tokens by their starting position
+    -- Sort tokens by starting position
     table.sort(tokens, function(a, b)
         return a.startPos < b.startPos
     end)
-    local end_pos = 0
+    
+    local endPos = 0
     for _, token in ipairs(tokens) do
-        local start_pos, found, char = token.startPos
-        if start_pos > end_pos then
+        local startPos, found, char = token.startPos
+        if startPos > endPos then
             if token.terminator == "\n" then
-                -- Handle single-line comments until newline
-                end_pos = lua_code:find("\n", start_pos + 1, true) or #lua_code
-                while lua_code:sub(end_pos, end_pos):match("%s") do
-                    end_pos = end_pos - 1
+                -- Find end of single-line comment
+                endPos = luaCode:find("\n", startPos + 1, true) or #luaCode
+                while luaCode:sub(endPos, endPos):match("%s") do
+                    endPos = endPos - 1
                 end
             elseif token.terminator then
-                -- Handle multi-line strings/comments
-                found, end_pos = lua_code:find(token.terminator, start_pos + 1, true)
-                assert(found, "Not a valid Lua code")
+                -- Find end of multi-line comment or string
+                found, endPos = luaCode:find(token.terminator, startPos + 1, true)
+                assert(found, "Invalid Lua code: Unclosed terminator")
             else
-                -- Handle quoted strings
-                end_pos = start_pos
+                -- Find end of quoted string
+                endPos = startPos
                 repeat
-                    found, end_pos, char = lua_code:find("(\\?.)", end_pos + 1)
-                    assert(found, "Not a valid Lua code")
+                    found, endPos, char = luaCode:find("(\\?.)", endPos + 1)
+                    assert(found, "Invalid Lua code: Unclosed string")
                 until char == token.quote
             end
-            local content = lua_code:sub(start_pos, end_pos):gsub("^%-*%s*", "")
+            -- Extract content and remove leading comment markers/spaces
+            local content = luaCode:sub(startPos, endPos):gsub("^%-*%s*", "")
             if token.terminator ~= "\n" then
+                -- Evaluate non-comment content (strings) to their Lua value
                 content = assert((loadstring or load)("return " .. content))()
             end
-            callback(token.isString and "string" or "comment", content, start_pos, end_pos)
+            callback(token.isString and "string" or "comment", content, startPos, endPos)
         end
     end
 end
 
--- Converts a string to its binary (byte) representation
-local function to_binary_string(str)
-    if str == "" then
+-- Converts a string to its escaped byte representation
+-- @param inputString The string to convert
+-- @return A string with escaped byte values
+local function stringToEscapedBytes(inputString)
+    if inputString == "" then
         return "''"
     end
-    return "'" .. str:gsub(".", function(s)
-        return "\\" .. s:byte()
+    return "'" .. inputString:gsub(".", function(char)
+        return "\\" .. char:byte()
     end):gsub(" ", "") .. "'"
 end
 
--- Replaces dot notation with bracket notation for table access
-local function convert_dots_to_brackets(lua_code)
-    lua_code = lua_code:gsub("%s*%.%s*", ".")
-    lua_code = lua_code:gsub("([%w_]+)%.([%w_]+)", '%1["%2"]')
-    lua_code = lua_code:gsub("%]%.([%w_]+)", ']["%1"]')
-    lua_code = lua_code:gsub("([%w_]+)%.%([%w_]+)%(", '%1["%2"](')
-    lua_code = lua_code:gsub("%)%.([%w_]+)", ')["%1"]')
-    return lua_code
+-- Replaces dot notation with bracket notation in Lua code
+-- @param luaCode The input Lua code
+-- @return Transformed code with bracket notation
+local function convertDotToBracket(luaCode)
+    luaCode = luaCode:gsub("%s*%.%s*", ".")
+    luaCode = luaCode:gsub("([%w_]+)%.([%w_]+)", '%1["%2"]')
+    luaCode = luaCode:gsub("%]%.([%w_]+)", ']["%1"]')
+    luaCode = luaCode:gsub("([%w_]+)%.%([%w_]+)%(", '%1["%2"](')
+    luaCode = luaCode:gsub("%)%.([%w_]+)", ')["%1"]')
+    return luaCode
 end
 
--- Converts method-style function declarations to explicit assignments
-local function convert_to_function_assignments(lua_code)
-    return lua_code:gsub("function%s*([%w_]+%[.-%])%s*%(", "%1 = function(")
+-- Converts method-style function declarations to assignment-style
+-- @param luaCode The input Lua code
+-- @return Transformed code with assignment-style functions
+local function convertToAssignmentFunctions(luaCode)
+    return luaCode:gsub("function%s*([%w_]+%[.-%])%s*%(", "%1 = function(")
 end
 
--- Converts a string to a table of byte values with additional metadata
-local function encode_to_bytes(str, index, identifier)
-    if str == "" then
+-- Converts a string to a table of byte values prefixed with an identifier
+-- @param inputString The string to convert
+-- @param identifier The identifier to prepend
+-- @return A string representation of the byte table
+local function stringToByteTable(inputString, identifier)
+    if inputString == "" then
         return "''"
     end
-    str = { str:byte(1, -1) }
-    str[#str + 1] = index
-    str[#str + 1] = identifier
-    return "{" .. table.concat(str, ",") .. "}"
+    return identifier .. "{" .. table.concat({inputString:byte(1, -1)}, ",") .. "}"
 end
 
--- Obfuscates Lua code by transforming strings and restructuring code
-local function obfuscate_code(lua_code, preset, preserve_bytecode)
-    -- Validate the input Lua code
-    local test, err = load("\t" .. lua_code)
+-- Obfuscates Lua code by transforming strings and applying transformations
+-- @param luaCode The input Lua code to obfuscate
+-- @param preset The transformation preset (1 for byte, 2 for hex)
+-- @return The obfuscated code or nil/0 on error with error data
+local function obfuscateLuaCode(luaCode, preset)
+    -- Validate Lua code
+    local test, err = load("\t" .. luaCode)
     if not test then
-        if not err then
-            err = "Unknown error"
-        end
+        err = err or "Unknown error"
         print("Failed to read file: " .. err)
         return
     end
 
-    -- Generate 64 unique 6-character identifiers
+    -- Generate 64 unique 6-character identifiers (uppercase letters)
     local identifiers = {}
     repeat
-        local new_id = ""
-        local is_unique = true
-        for i = 1, 6 do
-            new_id = new_id .. string.char(math.random(65, 90))
+        local newId = ""
+        local isUnique = true
+        for _ = 1, 6 do
+            newId = newId .. string.char(math.random(65, 90))
         end
-        for _, v in next, identifiers do
-            if v == new_id then
-                is_unique = false
+        for _, id in ipairs(identifiers) do
+            if id == newId then
+                isUnique = false
                 break
             end
         end
-        if is_unique and not lua_code:match(new_id) then
-            identifiers[#identifiers + 1] = new_id
+        if isUnique and not luaCode:match(newId) then
+            identifiers[#identifiers + 1] = newId
         end
     until #identifiers == 64
 
-    -- Convert all strings in the code to binary representation
-    local function convert_strings_to_binary(lua_code)
-        local pos = 1
-        local text = {}
-        parse_strings_and_comments(lua_code, function(object, value, start_pos, end_pos)
+    -- Convert strings to escaped byte representation
+    local function convertStringsToBinary(inputCode)
+        local currentPos = 1
+        local fragments = {}
+        parseStringsAndComments(inputCode, function(object, value, startPos, endPos)
             if object == "string" then
-                table.insert(text, lua_code:sub(pos, start_pos - 1))
-                table.insert(text, to_binary_string(value))
-                pos = end_pos + 1
+                table.insert(fragments, inputCode:sub(currentPos, startPos - 1))
+                table.insert(fragments, stringToEscapedBytes(value))
+                currentPos = endPos + 1
             end
         end)
-        table.insert(text, lua_code:sub(pos))
-        return table.concat(text)
+        table.insert(fragments, inputCode:sub(currentPos))
+        return table.concat(fragments)
     end
 
-    local string_counter = 0
-    local string_map = {}
+    local transformers = {byteTransformer, hexTransformer}
+    local transformCount = 0
+    local transformedStrings = {}
 
-    -- Replaces strings with obfuscated references
-    local function obfuscate_strings(str)
-        if str == "" then
+    -- Transform strings using the specified preset
+    local function transformString(inputString)
+        if inputString == "" then
             return "''"
         end
-        str = assert((load or loadstring)('return "' .. str .. '"'))()
-        if not string_map[str] then
-            string_counter = string_counter + 1
-            string_map[str] = identifiers[1] .. encode_to_bytes(str, string_counter, identifiers[2])
+        inputString = assert((load or loadstring)('return "' .. inputString .. '"'))()
+        if not transformedStrings[inputString] then
+            transformCount = transformCount + 1
+            transformedStrings[inputString] = identifiers[1] .. transformers[preset](inputString, transformCount, identifiers[2])
         end
-        return string_map[str]
+        return transformedStrings[inputString]
     end
 
-    lua_code = convert_strings_to_binary(lua_code)
-    lua_code = convert_dots_to_brackets(lua_code)
-    lua_code = convert_to_function_assignments(lua_code)
-    lua_code = lua_code:gsub("'(.-)'", function(s)
-        return obfuscate_strings(s)
+    -- Apply transformations to the code
+    luaCode = convertStringsToBinary(luaCode)
+    luaCode = convertDotToBracket(luaCode)
+    luaCode = convertToAssignmentFunctions(luaCode)
+    luaCode = luaCode:gsub("'(.-)'", transformString)
+    luaCode = luaCode:gsub('"(.-)"', transformString)
+    luaCode = luaCode:gsub("([%w_%]]+)%s*" .. identifiers[1] .. "{(.-)}", "%1(" .. identifiers[1] .. "{%2})")
+
+    -- Modify the translator with the preset and transform its strings
+    translator = translator:gsub("c%[9%] = 1", "c[9] = " .. preset)
+    translator = translator:gsub('"(.-)"', function(str)
+        str = load('return "' .. str .. '"')()
+        return stringToByteTable(str, identifiers[11])
     end)
-    lua_code = lua_code:gsub('"(.-)"', function(s)
-        return obfuscate_strings(s)
-    end)
-    lua_code = lua_code:gsub("([%w_%]]+)%s*" .. identifiers[1] .. "{(.-)}", "%1(" .. identifiers[1] .. "{%2})")
-
-    -- Replace placeholder identifiers in the translator module
-    for i, v in next, identifiers do
-        translator = translator:gsub("c" .. i, v)
+    for i, id in ipairs(identifiers) do
+        translator = translator:gsub("c" .. '%[' .. i .. '%]', id)
     end
 
-    -- Replace string.char with a precomputed byte table
-    local byte_table = {}
-    for i = 1, 256 do
-        byte_table[i] = "'\\" .. (i - 1) .. "'"
-    end
-    translator = translator:gsub("string%.char", "{" .. table.concat(byte_table, ",") .. "}")
+    -- Wrap code in an IIFE (Immediately Invoked Function Expression)
+    luaCode = "(function()\n\t" .. luaCode:gsub("\n", "\n\t") .. "\nend)"
 
-    -- Wrap the code in an IIFE (Immediately Invoked Function Expression)
-    lua_code = "(function()\n\t" .. lua_code:gsub("\n", "\n\t") .. "\nend)"
-
-    -- Prepare the final code with local declarations for identifiers
-    local data = "local " .. identifiers[1] .. ", " .. identifiers[2] .. ", " .. identifiers[3] .. "\nreturn " .. lua_code
-    test, err = load(data)
+    -- Prepare and validate the final code
+    local finalData = "local " .. identifiers[1] .. ", " .. identifiers[2] .. ", " .. identifiers[3] .. "\nreturn " .. luaCode
+    test, err = load(finalData)
     if not test then
-        if not err then
-            err = "Unknown error"
-        end
+        err = err or "Unknown error"
         print("Failed to encrypt script: " .. err)
-        return 0, data
+        return 0, finalData
     end
 
-    lua_code = lua_code:gsub("\n", "\n\t")
-    lua_code = translator:gsub("%-%- content", lua_code)
-    if not preserve_bytecode then
-        lua_code = string.dump(load(lua_code), true)
-    end
+    -- Insert code into translator and dump as bytecode
+    luaCode = luaCode:gsub("\n", "\n\t")
+    luaCode = translator:gsub("%-%- content", luaCode)
+    luaCode = string.dump(load(luaCode), true)
 
-    return lua_code
+    return luaCode
 end
 
--- Main script to handle file input and output
+-- Command-line interface for obfuscation
 if arg and #arg >= 1 then
-    local input_file = arg[1]
+    local inputFile = arg[1]
+    local preset = arg[2]
 
-    -- Validate that the input file is a Lua file
-    if not input_file:match("%.lua$") then
+    -- Determine preset (1 for byte, 2 for hex)
+    if not preset or preset == "" or preset == "--b" then
+        preset = 1
+    elseif preset == "--h" then
+        preset = 2
+    else
+        print("Preset not found!")
+        return
+    end
+
+    -- Validate input file extension
+    if not inputFile:match("%.lua$") then
         print("Please select *.lua file")
         return
     end
 
-    -- Read the input file
-    local file_handle, err = io.open(input_file, "rb")
-    if not file_handle then
-        if not err then
-            err = "Unknown error"
-        end
+    -- Read input file
+    local fileHandle, err = io.open(inputFile, "rb")
+    if not fileHandle then
+        err = err or "Unknown error"
         print(err)
         return
     end
-    local content = file_handle:read("*a")
-    file_handle:close()
+    local content = fileHandle:read("*a")
+    fileHandle:close()
 
     -- Define output paths
-    local output_path = input_file:gsub("%.lua$", "") .. ".enc.lua"
-    local error_path = input_file:gsub("%.lua$", "") .. ".err.lua"
-    content, data = obfuscate_code(content)
-    if not content then
+    local outputPath = inputFile:gsub("%.lua$", "") .. ".enc.lua"
+    local errorPath = inputFile:gsub("%.lua$", "") .. ".err.lua"
+
+    -- Obfuscate the code
+    local obfuscatedCode, errorData = obfuscateLuaCode(content, preset)
+    if not obfuscatedCode then
         return
-    elseif content == 0 then
-        io.open(error_path, "w"):write(data):close()
+    elseif obfuscatedCode == 0 then
+        io.open(errorPath, "w"):write(errorData):close()
         print("⚠️ Encryption Failed")
-        print("📁 The file has been saved on: " .. error_path)
+        print("📁 The file has been saved on: " .. errorPath)
         print("📎 Please check again and correct any errors.")
         return
     end
-    
-    -- Calculate and format the output file size
-    local size = #content
+
+    -- Calculate and format file size
+    local size = #obfuscatedCode
     if size < 1024 then
         size = size .. " B"
-    elseif size > 1024 and size < 1024 ^ 2 then
-        size = size / 1024
-        size = string.format("%.2f Kb", size)
-    elseif size > 1024 ^ 2 and size < 1024 ^ 3 then
-        size = size / (1024 ^ 2)
-        size = string.format("%.2f Mb", size)
+    elseif size < 1048576 then
+        size = string.format("%.2f Kb", size / 1024)
+    else
+        size = string.format("%.2f Mb", size / 1048576)
     end
-    
-    -- Write the obfuscated code to the output file
-    io.open(output_path, "w"):write(content):close()
+
+    -- Write obfuscated code to file
+    io.open(outputPath, "w"):write(obfuscatedCode):close()
     print("🎉 Encryption successful")
-    print("📁 The file has been saved on: " .. output_path)
+    print("📁 The file has been saved on: " .. outputPath)
     print("📄 Size: " .. size)
 end
